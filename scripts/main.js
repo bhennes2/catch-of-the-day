@@ -11,6 +11,9 @@ var createBrowserHistory = require('history/lib/createBrowserHistory');
 
 var h = require('./helpers');
 
+var Rebase = require('re-base');
+var base = Rebase.createClass('https://lpl-catch-of-the-day.firebaseio.com/');
+
 var App = React.createClass({
 
   getInitialState: function(){
@@ -19,6 +22,21 @@ var App = React.createClass({
       order: {}
     }
   },
+  componentDidMount: function(){
+    base.syncState(this.props.params.storeId + '/fishes', {
+      context: this,
+      state: 'fishes'
+    });
+    var localStorageRef = localStorage.getItem('order-' + this.props.params.storeId);
+    if (localStorageRef){
+      this.setState({
+        order: JSON.parse(localStorageRef)
+      });
+    }
+  },
+  componentWillUpdate: function(nextProps, nextState){
+    localStorage.setItem('order-' + this.props.params.storeId, JSON.stringify(nextState.order));
+  },
 
   addFish: function(fish){
     var timestamp = (new Date()).getTime();
@@ -26,18 +44,59 @@ var App = React.createClass({
     this.setState({ fishes: this.state.fishes });
   },
 
+  addToOrder: function(key){
+    this.state.order[key] = (this.state.order[key] || 0) + 1;
+    this.setState({ order: this.state.order });
+  },
+
+  loadSamples: function(){
+    this.setState({
+      fishes: require('./sample-fishes')
+    })
+  },
+
+  renderFish: function(key){
+    return <Fish key={key} index={key} details={this.state.fishes[key]} addToOrder={this.addToOrder} />
+  },
+
   render: function(){
     return (
       <div className="catch-of-the-day">
         <div className="menu">
           <Header tagline="Fresh Seafood Market" />
+          <ul className="list-of-fishes">
+            {Object.keys(this.state.fishes).map(this.renderFish)}
+          </ul>
         </div>
-        <Order />
-        <Inventory addFish={this.addFish} />
+        <Order fishes={this.state.fishes} order={this.state.order} />
+        <Inventory addFish={this.addFish} loadSamples={this.loadSamples} />
       </div>
     )
   }
 
+});
+
+var Fish = React.createClass({
+  onButtonClick: function(){
+    this.props.addToOrder(this.props.index);
+  },
+
+  render: function(){
+    var details = this.props.details;
+    var isAvailable = (details.status === 'available');
+    var buttonText = (isAvailable ? 'Add To Order' : 'Sold Out!');
+    return (
+      <li className="menu-fish">
+        <img src={details.image} alt={details.name} />
+        <h3 className="fish-name">
+          {details.name}
+          <span className="price">{h.formatPrice(details.price)}</span>
+        </h3>
+        <p>{details.desc}</p>
+        <button disabled={!isAvailable} onClick={this.onButtonClick}>{buttonText}</button>
+      </li>
+    )
+  }
 });
 
 var AddFishForm = React.createClass({
@@ -113,9 +172,45 @@ var StorePicker = React.createClass({
 });
 
 var Order = React.createClass({
+
+  renderOrder: function(key){
+    var fish = this.props.fishes[key];
+    var count = this.props.order[key];
+
+    if (!fish){
+      return <li key={key}>Sorry, fish no longer available!</li>
+    }
+    return (<li key={key}>
+      {count}lbs
+      {fish.name}
+      <span className="price">{h.formatPrice(count * fish.price)}</span>
+    </li>)
+  },
+
   render: function(){
+    var orderIds = Object.keys(this.props.order);
+    var total = orderIds.reduce((prevTotal, key)=> {
+      var fish = this.props.fishes[key];
+      var count = this.props.order[key];
+      var isAvailable = fish && fish.status === 'available';
+
+      if (fish && isAvailable){
+        return prevTotal + (count * parseInt(fish.price) || 0);
+      }
+      return prevTotal;
+    }, 0);
+
     return (
-      <p>Order</p>
+      <div className="order-wrap">
+        <h2 className="order-title">Your Order</h2>
+        <ul className="order">
+          {orderIds.map(this.renderOrder)}
+          <li className="total">
+            <strong>Total:</strong>
+            {h.formatPrice(total)}
+          </li>
+        </ul>
+      </div>
     )
   }
 });
@@ -126,6 +221,7 @@ var Inventory = React.createClass({
       <div>
         <h2>Inventory</h2>
         <AddFishForm {...this.props} />
+        <button onClick={this.props.loadSamples}>Load Sample Fishes</button>
       </div>
     )
   }
